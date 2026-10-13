@@ -1,36 +1,96 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# DO Dashboard
 
-## Getting Started
+A **read-only** Kubernetes explorer for clusters on DigitalOcean, AWS, Azure, Google Cloud or anywhere else.
+Connect several and switch between them from the top bar. It shows which cluster you are connected to, the nodes, every namespace, and the full detail of every pod: resources, containers,
+network routes, storage, scheduling, events and YAML.
 
-First, run the development server:
+Local only for now: no login, no database, no deployment.
+
+## Run it
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open http://127.0.0.1:3000. The server listens on `127.0.0.1` only, so nobody else on your network can reach it.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Clusters come from two places:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- **This machine's kubeconfig**, the same one `kubectl` uses (or the pod's own ServiceAccount when the dashboard runs
+  inside a cluster). Every context shows up as a *local* cluster. `KUBE_CONTEXT` in `.env.local` picks the default.
+- **Settings → Clusters**, for a server without a kubeconfig: paste a read-only ServiceAccount token (API server, token
+  and CA), or a kubeconfig whose credentials are written inside it. Apply `deploy/read-only-rbac.yaml` to the cluster
+  first; its header has the commands that print what to paste. This works the same on every cloud. Kubeconfigs from
+  `aws eks update-kubeconfig`, `az aks get-credentials`, `gcloud` or `doctl` run a program on your computer to log in,
+  so the dashboard refuses them and explains why. Each connection is tried (read-only, one item of each kind) before
+  it is saved to `.dashboard/clusters.json` (readable only by your user, ignored by git).
 
-## Learn More
+The cluster switcher in the top bar picks which one this browser shows (a cookie holding only the cluster's id); every
+page, the logs and the assistant follow it. The cloud is detected from the nodes and the API server's address.
+FinOps and node pools are DigitalOcean only for now; other clouds show what is planned (see `docs/providers.md`).
 
-To learn more about Next.js, take a look at the following resources:
+| Command | What it does |
+|---|---|
+| `npm run dev` | Dev server against your cluster |
+| `npm run build` / `npm start` | Production build and server |
+| `npm test` | Unit tests, including the read-only guards |
+| `npm run typecheck`, `npm run lint` | Static checks |
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## What you can do
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- **Overview**: connection details, cluster totals, pods that need attention, nodes, and a namespace explorer with search, filters and sorting. Changing the filter or sort glides the cards to their new places (View Transitions; instant where unsupported), cards lift on hover, and a namespace that needs attention has a slowly pulsing dot. Usage bars everywhere slide to new values when the page auto-refreshes instead of jumping. All motion is off for anyone whose system asks for reduced motion, and nothing replays on refresh.
+- **Namespace**: pods (search by name, release, image, node or IP, filter by status, sortable), workloads, services and ingresses, volumes, events.
+- **Architecture** (namespace tab): a live diagram of how requests reach the pods, left to right: Internet, load balancer, ingress controller, Ingress, Service, then the workloads with every pod drawn inside, plus the volumes they mount. It refreshes with the page, pods are coloured by health, and a pod that is not Ready is drawn as not receiving traffic. Click a pod, Service or workload to light its whole path (everything upstream back to the Internet, and what it uses). Solid lines come from Kubernetes objects (Ingress rules, Service selectors). Dashed lines are links a workload is configured to use, read from its literal environment values and arguments (a Service in this or another namespace, or a host outside the cluster such as a database); they show configuration, not observed traffic, and URLs are reduced to host and port so credentials never reach the diagram. Values that come from Secrets or ConfigMaps are not read, so links defined only there are not drawn (the page says how many settings that is). Nothing extra is requested from the cluster: it is built from the data the other pages already load.
+- **Pod**: overview and conditions, containers (state, last termination, ports, env sources, probes, mounts), resources (usage against request and limit with hints), network (pod IP, DNS name, services, public routes), storage and config sources, scheduling, events, YAML.
+- **Live logs**: the pod page has a Logs tab. Pick a container (or its previous run after a crash), press Start, and lines stream in live. Press Stop, leave the page, or close the tab and the stream ends, in the browser, the server and the cluster. Nothing is stored; the browser keeps only the latest 5,000 lines. Lines are shown exactly as the container wrote them (nothing is masked or filtered; only absurdly long lines are cut at 8,000 characters), at most 5 streams can be open at once, and each stops after 30 minutes. Turn it off with `ENABLE_LOGS=false`.
+- **Helm releases**: a `helm list -A` view at `/helm` with revision, status and last update for every release, plus a detail page with revision history, workloads and pods. Revision and status come from the labels of Helm's release Secrets, requested as metadata only, so the packed payload with chart values is never fetched. If that is not allowed, releases are still listed from the workloads Helm created.
+- **AI assistant** (sidebar, `/assistant`): a chat page for questions about the cluster, such as "which pods are close to their memory limit?" or "how does a request reach the API?". Each question sends Google Gemini a snapshot of the cluster built on the server from the data the other pages already load: nodes and node pools, namespaces, pods with requests, limits and usage, workloads, services, ingresses, volumes, Helm releases, how traffic is routed, the latest warning events and, when `DIGITALOCEAN_TOKEN` is set, the account's billing: the same figures as the FinOps page (spend so far, the projection and how it is worked out, invoice lines, node pool resizes with before and after rates, daily spend and the cost per namespace now), so it can answer questions such as "how much did the node resize add?". Without the token it says costs are not available. Environment values, Secrets, ConfigMaps, annotations and logs are never included (a guard test pins that). Answers come back as structured JSON and are drawn as sections: a status and one-line answer, findings with severities, tables, commands you can copy, and "Based on" links to the exact pods, nodes and services used. References to objects that are not in the snapshot are removed, commands that would change the cluster get a warning, and nothing is ever run. The conversation lives in the browser tab only. It needs `GEMINI_API_KEY` in `.env.local` (kept on the server; optional `GEMINI_MODEL`, `GEMINI_FALLBACK_MODELS`, and `ENABLE_AI=false` turns it off). When the chosen model is overloaded (Google's 503 "high demand") it retries once and then falls back to lighter models in order, and the answer's footer says which model answered. It calls the Gemini Interactions API with `store: false` so Google is asked not to keep the conversation. Whether free-tier content is used to improve Google's products depends on your Google terms, so check them before sending cluster data.
+- **Node pools and autoscaling**: with a read-only `DIGITALOCEAN_TOKEN` in `.env.local`, the Overview shows each node pool, its size, how many nodes it has now, and whether autoscaling is on with its minimum and maximum. It is read live from the DigitalOcean API (cached for 30 seconds), so changes made in the DigitalOcean console show up on their own. Without a token the rest of the dashboard works as before.
+- **FinOps** (sidebar, `/finops`): what the DigitalOcean account spends and what the cluster costs per namespace. It needs the same `DIGITALOCEAN_TOKEN` with the read scopes `billing:read`, `sizes:read` and `kubernetes:read`.
+  - *This month*: spend so far (the account balance), a projected month end, last month's invoice, the burn rate, the cluster's share and tax. Each invoice line gets an hourly rate (amount ÷ billed hours, or the last full day's charge ÷ 24 for daily-billed lines such as backups), and the projection is `so far + rate × hours left`, never above 672 hours per resource (DigitalOcean's monthly cap). Tax follows at the rate seen so far.
+  - *Where the money goes*: by product, by DigitalOcean project, the cluster against everything else, and every invoice line (searchable, sortable). A node pool resize is spotted from the invoice and called out.
+  - *Trends*: the running total by day against last month, spend per day and the monthly invoices, from Billing Insights (also as a table).
+  - *Per namespace, right now*: the node price is split 50% CPU / 50% memory; each pod pays `max(request, usage)` at those rates; volumes go to the namespace that claims them (matched to their invoice line by volume name); the load balancer is a shared row (matched to its Service by the name DigitalOcean gives it); what is left is idle capacity. The rows add up to the cluster's hourly rate, which the page compares with the invoice's. A full month is 672 hours. It is a live estimate, not a history.
+  - *Efficiency*: utilisation, requested-but-unused cost per namespace, pods without requests, the autoscaler's cost ceiling, Droplets billed outside the cluster with their backups, snapshots and backups.
+  - *Finding your way and digging in*: a sticky bar jumps between Summary, Where the money goes, Trends, Per namespace and Savings, and highlights the section you are reading. Every headline card has an ⓘ that opens "how is this calculated?" with the formula and the real numbers. Clicking a bar in By product, By project or Cluster vs everything else filters the invoice lines to it (with a chip to clear it); clicking an invoice line shows how its hourly rate and month were worked out; clicking a day in the daily chart lists what was billed that day; clicking a namespace in the cost table shows each pod's charge (on its request, or its usage when higher) and its volumes. The *vs same days last month* card compares this month so far with the same number of days last month, a like-for-like view.
+  - Only billing, the public size price list and the cluster's own record are read. The Droplet, Volume and Load Balancer APIs are never called (a guard test pins that); what those cost comes from the invoice. Answers are cached for 15 minutes, since DigitalOcean regenerates the invoice about once a day.
+- **Certificates** (sidebar, `/certificates`): every TLS certificate cert-manager manages: the hosts it covers, its issuer, status, a lifetime bar with the renewal point, expiry and renewal dates, and the Ingress that serves it; issuers (Let's Encrypt production or staging, self-signed, CA) and whether they are ready; ACME challenges in progress with cert-manager's reason when one is stuck. A certificate is critical when it is not ready, expired or expires within 7 days, and a warning when it expires within 14 days or its renewal time passed more than a day ago without renewal; those show on the Overview and as a badge in the sidebar. It reads cert-manager's Certificate, Issuer, ClusterIssuer and Challenge objects with list calls only; the Secrets holding certificates and private keys are never read, and the ACME account email is not shown. The AI assistant gets the same list.
+- **Access** (sidebar, `/access`): who and what can act on the cluster, from its RBAC roles and bindings. *People* reach DOKS through their DigitalOcean team role (Kubernetes groups `do-role-name:<role>`) and DigitalOcean-issued kubeconfigs (`k8saas:authenticated`); *apps and operators* through the ServiceAccount their pods run as; *system* subjects (Kubernetes and DigitalOcean components) are listed separately. Each subject's rules are summarised as capabilities with their scope (cluster-wide or the namespaces): full admin, can grant itself any access (`escalate`, `bind` or `impersonate`), manages roles (create roles and bindings, limited by Kubernetes to permissions it already has), creates ServiceAccount tokens, reads or changes Secrets, exec into pods, changes workloads or nodes, reads most resources, checks tokens. Rules limited to named objects are marked and rated lower. Open a subject to see every binding, role and rule behind it. It also lists the ServiceAccounts your pods run as that have no permissions at all (the safe default). The sidebar shows a red count if an app or operator could take over the cluster. It lists Roles, ClusterRoles and their bindings only; Secret values are never read. The AI assistant gets the same summary. Each namespace page also has an **Access** tab: the ServiceAccounts its own workloads run as and what they can do (or "no Kubernetes API access"), the RoleBindings that live in the namespace, and who else can reach in, grouped by what they can do there (read or change its Secrets, exec into its pods, change its workloads...), with the full admins listed once and system components counted rather than listed.
+- **Settings** (sidebar, `/settings`): *Clusters* lists every cluster (local kubeconfig contexts and saved ones, with the detected cloud), shows one in this browser, removes a saved one, and adds one with a read-only token or a kubeconfig (described under *Run it*). Below it, paste the DigitalOcean token and the Gemini API key and click *Connect*, or pick the default auto-refresh. A token is tried first with one read-only request per scope (`kubernetes:read`, `billing:read`, `sizes:read`) and the page says which work; a key is tried against the configured model's record (no cluster data is sent). Anything DigitalOcean or Google refuses is not saved. Accepted values are written to `.env.local` (other lines kept, file readable only by your user) and used at once, without a restart; FinOps, node pools and the assistant pick them up on the next page load. Secrets are never sent back to the browser (only their last four characters are shown), values are never logged, and the endpoint only answers requests from this machine. *Test* re-checks what is saved; *Remove* deletes it. The DigitalOcean token is checked against the cluster being shown, or the first DigitalOcean cluster when another cloud's is shown.
+- **Node**: capacity, requests and usage, conditions, labels, and the pods running on it.
+- **Global search**: press **Cmd+K** (Ctrl+K on Windows and Linux) or click *Search…* in the top bar, from any page. One box finds pages, namespaces, workloads, pods, Services, Ingresses, volumes, Helm releases, certificates and nodes by name, and also by host, IP (pod, cluster, public or node), image, commit, Helm release or node. Every word must match; exact names come first, then names that start with the query, then matches on a field, and each result says what it matched on (for example "IP 10.108.2.103"). Arrow keys move, Enter opens, Esc closes. The index is built on the server from data the page already loaded and searched in the browser, so it adds no cluster reads; it never holds environment values or Secrets.
+- Theme: System, Light or Dark from the top bar. The sidebar's namespace list is collapsed under a *Namespaces* header (click it, or its arrow, to open or close it; the choice is remembered in the browser). It slides and fades open and closed (about 0.2 s; instant for anyone whose system asks for reduced motion, and not replayed when a saved open list is restored on page load). Collapsed, it still shows the namespace you are in and an amber count of namespaces with pods that need attention. Press `/` to open it and jump to the namespace search.
 
-## Deploy on Vercel
+## Safety
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- **Read-only by construction.** The data layer (`src/lib/k8s/source.ts`) has no write methods, every API client is wrapped so that anything other than `list*`, `read*` or `get*` throws, and `guard.test.ts` fails if a write call appears in the source.
+- **Secret contents are never read.** The one use of Secrets is the labels of Helm release Secrets (name, revision, status, updated), asked for as metadata only, in one file (`src/lib/k8s/helm.ts`), pinned by a guard test. The dashboard never uses exec or port-forward. The one deliberate extra is live logs: a single read-only `GET .../pods/<pod>/log`, in one file (`src/lib/k8s/logs.ts`), with the guard test pinning that down. Log requests are only accepted from this machine, and names are validated before they reach the cluster.
+- **Values are shown as they are.** Environment variables, commands, arguments and logs appear exactly as Kubernetes and the containers provide them, with nothing masked, because this is an internal tool. `last-applied-configuration` and managed fields are dropped for readability, and kubeconfig credentials are never shown. Kubernetes Secret objects are never read, so Secret references appear by name only.
+- **Local clusters use your own kubeconfig**, which is probably an admin credential, so keep it on `127.0.0.1` and don't expose it. For a shared deployment, add clusters with the read-only ServiceAccount from `deploy/read-only-rbac.yaml` (no write verbs, no Secrets, no exec), plus login (planned).
+- **Saved clusters cannot reach outside what was pasted.** A pasted kubeconfig is read as plain YAML; file paths, `exec` plugins, auth providers, passwords, proxies and `insecure-skip-tls-verify` are refused, and TLS is always verified against the CA given. Tokens are kept in `.dashboard/clusters.json` (mode 0600; encryption at rest is planned), never sent back to the browser and never logged. Adding, testing and removing clusters is accepted from this machine only; choosing one only sets a cookie.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Layout
+
+```
+src/lib/clusters/ clusters: validation and kubeconfig parsing (pure), the saved-cluster store, the registry and selection
+src/lib/providers/ cloud detection and what each cloud supports (docs/providers.md)
+deploy/           read-only-rbac.yaml: the ServiceAccount to connect a cluster with
+src/lib/k8s/      data layer: live source, views, certificates, access (RBAC), sanitising, read-only guard, log reader, tests
+src/lib/logs/     live-log core: line splitting, limits, clean stop (no network)
+src/lib/topology/ architecture diagram: builder, layered layout, request-path trace (pure, tested)
+src/lib/ai/       AI assistant: snapshot, answer schema and checks, prompt, the one Gemini client
+src/lib/search*.ts global search: index builder (server) and matching (browser)
+src/lib/finops/   FinOps: billing parsers, rates and projection, per-namespace allocation, money formatting (pure, tested)
+src/lib/do/       DigitalOcean API: node pools, and billing.ts, the one file that reads billing
+src/app/api/logs/ the Server-Sent Events endpoint behind the Logs tab
+src/lib/data.ts   one cached load per request, with graceful degradation
+src/components/   layout, cluster views, tables, UI primitives
+src/app/          pages: /, /namespaces/[ns], /namespaces/[ns]/pods/[pod], /nodes/[name], /helm, /certificates, /access, /assistant, /finops
+src/test/         test-only sample cluster used by the unit tests (not part of the app)
+```
+
+## Not in this version
+
+Per-namespace cost history (needs storage), more DigitalOcean API data (droplets, volumes, load balancers),
+network policies and live traffic, login and deployment, FinOps and node pools for AWS, Azure and Google Cloud.

@@ -1,9 +1,10 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
-  cacheComponents: true,
-  partialPrefetching: true,
+  // Dev-only "N" button: keep it out of the sidebar footer.
+  devIndicators: { position: "bottom-right" },
+  // The Kubernetes client uses Node-only APIs; keep it out of the bundle.
+  serverExternalPackages: ["@kubernetes/client-node"],
   turbopack: {
     rules: {
       "*.css": {

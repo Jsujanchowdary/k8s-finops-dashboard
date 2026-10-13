@@ -1,26 +1,204 @@
 @import "tailwindcss";
 
+/* Dark is the default. "System" follows the OS; the toggle can force light or dark
+   by setting data-theme on <html> (see ThemeToggle and the inline script in layout.tsx). */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --bg: #0b0f14;
+  --surface: #121821;
+  --surface-2: #19212c;
+  --border: #243040;
+  --text: #e6edf5;
+  --muted: #8b98a9;
+  --accent: #4c8dff;
+  --success: #2fbf71;
+  --warning: #e6a23c;
+  --danger: #ef5a5a;
+  --info: #4cc2ff;
+  --glass-edge: rgb(255 255 255 / 0.07);
+  color-scheme: dark;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    --bg: #f4f6f9;
+    --surface: #ffffff;
+    --surface-2: #eef1f5;
+    --border: #dce2ea;
+    --text: #16202b;
+    --muted: #5f6d80;
+    --accent: #2563eb;
+    --success: #15803d;
+    --warning: #a16207;
+    --danger: #dc2626;
+    --info: #0369a1;
+    --glass-edge: rgb(255 255 255 / 0.7);
+    color-scheme: light;
   }
 }
 
+:root[data-theme="light"] {
+  --bg: #f4f6f9;
+  --surface: #ffffff;
+  --surface-2: #eef1f5;
+  --border: #dce2ea;
+  --text: #16202b;
+  --muted: #5f6d80;
+  --accent: #2563eb;
+  --success: #15803d;
+  --warning: #a16207;
+  --danger: #dc2626;
+  --info: #0369a1;
+  --glass-edge: rgb(255 255 255 / 0.7);
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-border: var(--border);
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+  --color-info: var(--info);
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+html {
+  background: var(--bg);
+  color: var(--text);
+}
+
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+/* Thin, unobtrusive scrollbars for the sidebar and code blocks */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* Architecture diagram (React Flow): only the pieces that need to follow the light/dark tokens. */
+.react-flow {
+  --xy-edge-stroke-default: var(--muted);
+  background: transparent;
+}
+
+.react-flow__controls {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: none;
+}
+
+.react-flow__controls-button {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.react-flow__controls-button:last-child {
+  border-bottom: 0;
+}
+
+.react-flow__controls-button:hover {
+  background: var(--surface-2);
+}
+
+.react-flow__controls-button svg {
+  max-width: 13px;
+  max-height: 13px;
+  fill: currentColor;
+}
+
+.react-flow__minimap {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.react-flow__attribution {
+  background: transparent;
+  font-size: 10px;
+}
+
+.react-flow__attribution a {
+  color: var(--muted);
+}
+
+.react-flow__edge-textbg {
+  opacity: 0.95;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .react-flow__edge.animated path {
+    animation: none;
+  }
+}
+
+/* Frosted glass for the global search (Cmd+K). The panel stays mostly opaque so text keeps its contrast over any page.
+   Solid, as before, when the browser cannot blur or the viewer asks their system for reduced transparency.
+   The component also carries the solid Tailwind classes; these unlayered rules win over them when present. */
+.glass-backdrop {
+  background: rgb(0 0 0 / 0.5);
+}
+.glass-panel {
+  background: var(--surface);
+  border-color: var(--border);
+  box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25);
+}
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .glass-backdrop {
+    background: rgb(0 0 0 / 0.3);
+    -webkit-backdrop-filter: blur(3px);
+    backdrop-filter: blur(3px);
+  }
+  .glass-panel {
+    background: color-mix(in srgb, var(--surface) 78%, transparent);
+    -webkit-backdrop-filter: blur(24px) saturate(160%);
+    backdrop-filter: blur(24px) saturate(160%);
+    border-color: color-mix(in srgb, var(--text) 14%, transparent);
+    box-shadow: inset 0 1px 0 var(--glass-edge), 0 30px 70px -15px rgb(0 0 0 / 0.45);
+  }
+  .glass-panel .glass-divider {
+    border-color: color-mix(in srgb, var(--text) 10%, transparent);
+  }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .glass-backdrop {
+    background: rgb(0 0 0 / 0.5);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .glass-panel {
+    background: var(--surface);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
 }

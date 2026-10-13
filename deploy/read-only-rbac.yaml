@@ -1,0 +1,98 @@
+# A read-only identity for the dashboard. Works the same on DigitalOcean (DOKS), AWS (EKS), Azure (AKS), Google (GKE)
+# or any other Kubernetes cluster.
+#
+# It can get, list and watch exactly what the dashboard shows, and read pod logs. It cannot change anything, cannot
+# exec into pods, and cannot read Secrets (see the optional rule at the end for Helm release history).
+#
+# 1. Apply it (you run this; the dashboard never changes a cluster):
+#      kubectl apply -f deploy/read-only-rbac.yaml
+#
+# 2. Print what to paste into Settings → Clusters → Read-only token:
+#      kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}'; echo                 # API server
+#      kubectl -n do-dashboard get secret do-dashboard-reader-token -o jsonpath='{.data.token}' | base64 --decode; echo   # token
+#      kubectl -n do-dashboard get secret do-dashboard-reader-token -o jsonpath='{.data.ca\.crt}'; echo                    # CA (base64)
+#
+#    The token does not expire. To revoke it: kubectl -n do-dashboard delete secret do-dashboard-reader-token
+#    (a new one is created if you apply this file again). To remove everything: kubectl delete -f deploy/read-only-rbac.yaml
+#
+# 3. Check what it may do (every line should say "yes", and the last two "no"):
+#      kubectl auth can-i list pods -A        --as=system:serviceaccount:do-dashboard:do-dashboard-reader
+#      kubectl auth can-i list nodes          --as=system:serviceaccount:do-dashboard:do-dashboard-reader
+#      kubectl auth can-i get pods/log -A     --as=system:serviceaccount:do-dashboard:do-dashboard-reader
+#      kubectl auth can-i delete pods -A      --as=system:serviceaccount:do-dashboard:do-dashboard-reader
+#      kubectl auth can-i list secrets -A     --as=system:serviceaccount:do-dashboard:do-dashboard-reader
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: do-dashboard
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: do-dashboard-reader
+  namespace: do-dashboard
+---
+# A long-lived token for the ServiceAccount (Kubernetes fills in .data.token and .data.ca.crt).
+apiVersion: v1
+kind: Secret
+metadata:
+  name: do-dashboard-reader-token
+  namespace: do-dashboard
+  annotations:
+    kubernetes.io/service-account.name: do-dashboard-reader
+type: kubernetes.io/service-account-token
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: do-dashboard-reader
+rules:
+  # Overview, nodes, namespaces, pods, storage and events.
+  - apiGroups: [""]
+    resources: [nodes, namespaces, pods, services, persistentvolumeclaims, persistentvolumes, events]
+    verbs: [get, list, watch]
+  # Live logs (read only; no exec, attach or port-forward).
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get]
+  - apiGroups: [apps]
+    resources: [deployments, statefulsets, daemonsets]
+    verbs: [get, list, watch]
+  - apiGroups: [networking.k8s.io]
+    resources: [ingresses]
+    verbs: [get, list, watch]
+  # CPU and memory usage (metrics-server).
+  - apiGroups: [metrics.k8s.io]
+    resources: [nodes, pods]
+    verbs: [get, list]
+  # Certificates page (cert-manager). Harmless if cert-manager is not installed.
+  - apiGroups: [cert-manager.io]
+    resources: [certificates, issuers, clusterissuers]
+    verbs: [get, list, watch]
+  - apiGroups: [acme.cert-manager.io]
+    resources: [challenges]
+    verbs: [get, list, watch]
+  # Access page: who can do what. Reading roles grants none of their permissions.
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources: [roles, rolebindings, clusterroles, clusterrolebindings]
+    verbs: [get, list, watch]
+  # Optional: Helm release history. Helm keeps it in Secrets; the dashboard asks only for their labels (metadata),
+  # never their contents, but Kubernetes cannot grant "labels only", so this rule would allow reading Secret contents.
+  # Without it the Helm page still lists releases from the workloads, without revision numbers.
+  # - apiGroups: [""]
+  #   resources: [secrets]
+  #   verbs: [list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: do-dashboard-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: do-dashboard-reader
+subjects:
+  - kind: ServiceAccount
+    name: do-dashboard-reader
+    namespace: do-dashboard
